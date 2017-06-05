@@ -4,31 +4,38 @@
 file_path db 120 dup('$')
 program_segment dw 0
 fd dw -1
-usageMsg db "Usage: lab8 [file_path]$"
+usageMsg db "Usage: lab8 [file_to_print] [printscr_file]$"
 open_file_errorMsg db "Can not open specified file$"
 buffer db 100 dup(0)
 buffer_size equ $-buffer
 
 .code
+print_file_path db 120 dup ('$')
 screen_size equ 4000
-print_file_path db "C:\print.txt", 0, '$'
 print_file_fd dw -1
 screen db 2050 dup ('-')
 
 proc print_screen_listener far
+	push ax
+	push bx
+	push cx
+	push dx
 	push ds
-	mov ax, cs
-	mov ds, ax	 
+	push es
+	push si
 
-    ; ----- try to open screen file -----
+	mov ax, cs
+	mov ds, ax
+
+	; ----- try to open screen file -----
 	mov ah, 3Ch
-	mov cx, 0A001h 	;1010_0001
+	mov cx, 0; mov cx, 0A001h 	;1010_0001
 	lea dx, print_file_path
 	int 21h
 	jnc open_tmp_file_ok
 		jmp print_screen_listener_error
 	open_tmp_file_ok:
-	mov print_file_fd, ax	 
+	mov print_file_fd, ax
 	; -------------------------------------
 
 	mov ax, 0B800h
@@ -75,9 +82,16 @@ proc print_screen_listener far
 	;------------------------
 
 	print_screen_listener_error:
-	
+
+	pop si
+	pop es
 	pop ds
+	pop dx
+	pop cx
+	pop bx
+	pop ax
 	iret
+	ret
 endp print_screen_listener
 interruption_offset equ $ + 1
 
@@ -97,24 +111,55 @@ endp setup_prt_sc_listener
 
 ; lab8 [number] [file_paht]
 ; file_path = file_paht
+; ax = result status, 0 on success
 ; NOTE: es -- data, ds -- psp
 proc parse_cmd
 	mov si, 82h	;81 is space, lol
+
+	mov cx, 0
 	mov cl, [ds:80h]
+	cmp cl, 1
+	jng parse_error
+
 	sub cl, 1
 	lea di, file_path
+
+	parse_first_file:
+	cmp ds:si, byte ptr 20h
+	je parse_first_file_end
+	cmp cl, 0
+	je parse_error	
+	mov al, word ptr ds:si
+	mov word ptr es:di, al
+	inc di
+	inc si
+	dec cl 
+	jmp parse_first_file
+	parse_first_file_end:
+
+	mov es:di, byte ptr 0
+	inc si
+	dec cl
+
+	push es
+	mov ax, cs
+	mov es, ax
+	lea di, print_file_path
 	repne movsb	; ds:si -> es:di
 	mov es:di, byte ptr 0h
+	pop es
+
+	mov ax, 0
+	jmp parse_cmd_exit
+
+	parse_error: 
+	mov ax, 1
+
+	parse_cmd_exit:
 	ret
 endp parse_cmd
 
 start:
-	mov al, [ds:80h]
-	cmp al, 1
-	jg validate_arg_ok
-	jmp show_usage
-	validate_arg_ok:
-
 	;------ get and parse cla -----
 	mov ax, @data
 	mov es, ax
@@ -123,6 +168,11 @@ start:
 	mov [es:bx], ds
 
 	call parse_cmd
+	cmp ax, 0
+	je validate_arg_ok
+	jmp show_usage
+	validate_arg_ok:
+
 	mov bx, @data
 	mov ds, bx
 	;------------------------------
